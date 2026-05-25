@@ -21,78 +21,37 @@ async function requireAdmin() {
   return user
 }
 
-const VALID_VENUE_TYPES = ["LECTURE_HALL", "LAB", "SEMINAR_ROOM"] as const
+// ─── PATCH /api/timeslots/[id] ────────────────────────────────────────────────
+// Toggles the is_active flag on a single time slot. Admin only.
+// Only is_active may be changed — all other slot fields (day, times) are
+// immutable because they are structural to the timetable model.
+// Body: { is_active: boolean }
 
-// ─── GET /api/venues ──────────────────────────────────────────────────────────
-// Returns all venues (active and inactive) ordered by name.
-// Accessible to any authenticated user — lecturers and students need the
-// venue name when viewing their timetable.
-
-export async function GET() {
-  const supabase = await createClient()
-
-  const { data, error } = await supabase
-    .from("venues")
-    .select("*")
-    .order("name")
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
-}
-
-// ─── POST /api/venues ─────────────────────────────────────────────────────────
-// Creates a new venue. Admin only.
-// Body: { name, capacity, venue_type, is_active? }
-
-export async function POST(request: Request) {
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   const user = await requireAdmin()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
+  const { id } = await params
   const body = await request.json()
-  const { name, capacity, venue_type, is_active = true } = body
 
-  // ── Validation ──────────────────────────────────────────────────────────────
-  if (!name?.trim()) {
-    return NextResponse.json({ error: "Venue name is required" }, { status: 400 })
-  }
-
-  const cap = Number(capacity)
-  if (!cap || cap < 1) {
+  if (typeof body.is_active !== "boolean") {
     return NextResponse.json(
-      { error: "Capacity must be a positive number" },
+      { error: "is_active must be a boolean" },
       { status: 400 }
     )
   }
 
-  if (!VALID_VENUE_TYPES.includes(venue_type)) {
-    return NextResponse.json(
-      { error: "Venue type must be LECTURE_HALL, LAB, or SEMINAR_ROOM" },
-      { status: 400 }
-    )
-  }
-
-  // ── Insert ──────────────────────────────────────────────────────────────────
   const admin = createAdminClient()
   const { data, error } = await admin
-    .from("venues")
-    .insert({
-      name: name.trim(),
-      capacity: cap,
-      venue_type,
-      is_active: Boolean(is_active),
-    })
+    .from("time_slots")
+    .update({ is_active: body.is_active })
+    .eq("id", id)
     .select()
     .single()
 
-  if (error) {
-    if (error.code === "23505") {
-      return NextResponse.json(
-        { error: "A venue with this name already exists" },
-        { status: 409 }
-      )
-    }
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json(data, { status: 201 })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json(data)
 }

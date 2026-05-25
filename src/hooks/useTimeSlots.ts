@@ -44,8 +44,9 @@ export function useToggleTimeSlot() {
     mutationFn: toggleTimeSlot,
     // Optimistic update — flip the flag in cache immediately so the toggle
     // feels instant; if the request fails the cache is rolled back by React Query.
-    onMutate: async ({ id, is_active }) => {
+    onMutate: async ({ id, is_active }) => { 
       await queryClient.cancelQueries({ queryKey: ["timeslots"] })
+      console.log('query canceled')
       const previous = queryClient.getQueryData<TimeSlot[]>(["timeslots"])
       queryClient.setQueryData<TimeSlot[]>(["timeslots"], (old) =>
         old?.map((s) => (s.id === id ? { ...s, is_active } : s)) ?? []

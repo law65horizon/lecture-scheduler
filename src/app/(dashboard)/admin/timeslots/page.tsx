@@ -16,7 +16,7 @@ const TIME_BLOCKS = [
   { start: "16:00:00", end: "18:00:00", label: "16:00 – 18:00" },
 ]
 
-const DAYS: DayOfWeek[] = [1, 2, 3, 4, 5]
+const DAYS: DayOfWeek[] = [1, 2, 3, 4, 5] 
 
 export default function TimeSlotsPage() {
   const { data: slots, isLoading } = useTimeSlots()
@@ -99,10 +99,13 @@ export default function TimeSlotsPage() {
                             aria-label={`${DAY_NAMES[day]} ${formatTimeSlot(slot.start_time, slot.end_time)} — ${slot.is_active ? "active" : "inactive"}`}
                             disabled={isPending}
                             onClick={() =>
+                            {
+                              console.log("toggling");
                               toggle.mutate({
                                 id: slot.id,
                                 is_active: !slot.is_active,
                               })
+                            }
                             }
                             className={cn(
                               "mx-auto flex items-center justify-center w-8 h-8 rounded-lg border transition-colors duration-100",
