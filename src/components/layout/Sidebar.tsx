@@ -30,6 +30,7 @@ const ADMIN_NAV: NavItem[] = [
   { label: "Courses",      href: "/admin/courses",      icon: BookOpen     },
   { label: "Departments",  href: "/admin/departments",  icon: Layers       },
   { label: "Venues",       href: "/admin/venues",       icon: Building2    },
+  { label: "Cohorts",       href: "/admin/cohorts",     icon: LayoutGrid    },
   { label: "Lecturers",    href: "/admin/lecturers",    icon: Users        },
   { label: "Time slots",   href: "/admin/timeslots",    icon: Clock        },
 ]

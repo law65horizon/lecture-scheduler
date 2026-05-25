@@ -16,7 +16,7 @@ export interface Cohort {
   department_id: string
   year_level: YearLevel
   student_count: number
-  department?: Department
+  departments?: Department
 }
 
 export interface Venue {

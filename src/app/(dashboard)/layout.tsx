@@ -18,6 +18,7 @@ export default async function DashboardLayout({
     .eq("id", user.id)
     .single()
 
+  console.log({profile})
   if (!profile) redirect("/login")
 
   return (
