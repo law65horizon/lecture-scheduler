@@ -27,7 +27,6 @@ const LEVEL_BADGE: Record<number, string> = {
 
 export default function CohortsPage() {
   const { data: cohorts, isLoading } = useCohorts()
-  console.log({cohorts})
   const deleteCohort = useDeleteCohort()
 
   const [modalOpen, setModalOpen] = useState(false)

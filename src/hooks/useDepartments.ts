@@ -9,7 +9,6 @@ async function fetchDepartments(): Promise<Department[]> {
 }
 
 async function createDepartment(body: { name: string; code: string }) {
-  console.log({body})
   const res = await fetch("/api/departments", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

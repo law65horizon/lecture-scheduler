@@ -12,7 +12,6 @@ import { Plus, Users, Pencil, Trash2 } from "lucide-react"
 export default function AdminLecturersPage() {
   const { data: lecturers, isLoading } = useLecturers()
   const deleteLecturer = useDeleteLecturer()
-  console.log({lecturers})
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<LecturerRow | null>(null)

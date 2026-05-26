@@ -72,7 +72,6 @@ export function VenueModal({ open, onClose, editing }: Props) {
     }
 
     if (editing) {
-      console.log({ payload })
       await update.mutateAsync({ id: editing.id, ...payload })
     } else {
       await create.mutateAsync(payload)

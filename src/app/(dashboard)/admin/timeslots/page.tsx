@@ -100,7 +100,6 @@ export default function TimeSlotsPage() {
                             disabled={isPending}
                             onClick={() =>
                             {
-                              console.log("toggling");
                               toggle.mutate({
                                 id: slot.id,
                                 is_active: !slot.is_active,
