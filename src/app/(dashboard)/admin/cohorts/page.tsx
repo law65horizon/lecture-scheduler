@@ -129,7 +129,7 @@ export default function CohortsPage() {
                   >
                     {/* Department cell — only shown on the first row of a group */}
                     <td className="px-5 py-3.5 font-medium text-gray-900 align-top">
-                      {idx === 0 ? (
+                      {0 === 0 ? (
                         <div className="flex items-center gap-2">
                           <span>{deptName}</span>
                           <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono font-medium bg-gray-100 text-gray-500">
