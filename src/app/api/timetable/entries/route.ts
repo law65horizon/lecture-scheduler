@@ -2,7 +2,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient }      from '@/lib/supabase/server'
 import { NextResponse }       from 'next/server'
 import { checkHardConstraints } from '@/lib/solver/constraints'
-import type { Venue, Cohort, ProposedSession, Semester } from '@/lib/types/domain'
+import { buildConstraintSnapshot } from '@/lib/timetable/snapshot'
+import type { Semester } from '@/lib/types/domain'
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -19,64 +20,6 @@ async function requireAdmin() {
 
   if (profile?.role !== 'ADMIN') return null
   return user
-}
-
-// ─── Shared: build constraint-check snapshots ─────────────────────────────────
-// Used by both POST (create) and the [id] PUT route.
-
-async function buildConstraintSnapshot(
-  admin: ReturnType<typeof createAdminClient>,
-  academic_year: string,
-  semester: number,
-  excludeSessionId?: string,   // for PUT: exclude the session being edited
-) {
-  // All existing committed sessions for this year+semester (as ProposedSessions)
-  let query = admin
-    .from('timetable_sessions')
-    .select(`id, course_id, lecturer_id, venue_id, time_slot_id, session_cohorts(cohort_id)`)
-    .eq('academic_year', academic_year)
-    .eq('semester', semester)
-
-  if (excludeSessionId) {
-    query = query.neq('id', excludeSessionId)
-  }
-
-  const { data: sessions, error: sessErr } = await query
-  if (sessErr) return { error: sessErr.message }
-
-  const committed: ProposedSession[] = (sessions ?? []).map((s: any) => ({
-    course_id:     s.course_id,
-    lecturer_id:   s.lecturer_id,
-    venue_id:      s.venue_id,
-    time_slot_id:  s.time_slot_id,
-    academic_year,
-    semester:      semester as Semester,
-    cohort_ids:    (s.session_cohorts ?? []).map((sc: any) => sc.cohort_id),
-  }))
-
-  const { data: venues, error: venueErr } = await admin
-    .from('venues')
-    .select('id, name, capacity, venue_type, is_active')
-  if (venueErr) return { error: venueErr.message }
-
-  const { data: cohorts, error: cohortErr } = await admin
-    .from('cohorts')
-    .select('id, department_id, year_level, student_count')
-  if (cohortErr) return { error: cohortErr.message }
-
-  const cohortMap = new Map<string, Cohort>(
-    (cohorts ?? []).map((c: any) => [c.id, c as Cohort])
-  )
-
-  const { data: unavailRows } = await admin
-    .from('lecturer_unavailability')
-    .select('lecturer_id, time_slot_id')
-
-  const unavailableSlots = new Set<string>(
-    (unavailRows ?? []).map((r: any) => `${r.lecturer_id}|${r.time_slot_id}`)
-  )
-
-  return { committed, venues: (venues ?? []) as Venue[], cohortMap, unavailableSlots }
 }
 
 // ─── GET /api/timetable/entries ───────────────────────────────────────────────
@@ -105,8 +48,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'semester must be 1 or 2' }, { status: 400 })
   }
 
-  // The RLS policy on timetable_sessions already filters non-admins to
-  // is_published = true, so we don't need to add that filter here.
   const { data: sessions, error } = await supabase
     .from('timetable_sessions')
     .select(`
@@ -136,7 +77,7 @@ export async function GET(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // We also need lecturer names — same two-step pattern as /api/lecturers
+  // Fetch lecturer names — same two-step pattern as /api/lecturers
   const admin = createAdminClient()
 
   const lecturerIds = [...new Set((sessions ?? []).map((s: any) => s.lecturer_id))]
@@ -164,7 +105,6 @@ export async function GET(request: Request) {
     )
   }
 
-  // Shape the response
   const shaped = (sessions ?? []).map((s: any) => ({
     id:           s.id,
     course_id:    s.course_id,
@@ -205,7 +145,6 @@ export async function POST(request: Request) {
   const { course_id, lecturer_id, venue_id, time_slot_id,
           academic_year, semester, cohort_ids } = body
 
-  // ── Validation ─────────────────────────────────────────────────────────────
   if (!course_id || !lecturer_id || !venue_id || !time_slot_id) {
     return NextResponse.json(
       { error: 'course_id, lecturer_id, venue_id, and time_slot_id are required' },
@@ -219,15 +158,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'semester must be 1 or 2' }, { status: 400 })
   }
   if (!Array.isArray(cohort_ids) || cohort_ids.length === 0) {
-    return NextResponse.json(
-      { error: 'cohort_ids must be a non-empty array' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'cohort_ids must be a non-empty array' }, { status: 400 })
   }
 
   const admin = createAdminClient()
 
-  // ── Hard-constraint check ──────────────────────────────────────────────────
   const snapshot = await buildConstraintSnapshot(admin, academic_year.trim(), semester)
   if ('error' in snapshot) {
     return NextResponse.json({ error: snapshot.error }, { status: 500 })
@@ -248,7 +183,6 @@ export async function POST(request: Request) {
     )
   }
 
-  // ── Insert timetable_session ───────────────────────────────────────────────
   const { data: session, error: sessErr } = await admin
     .from('timetable_sessions')
     .insert({
@@ -274,7 +208,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: sessErr.message }, { status: 500 })
   }
 
-  // ── Insert session_cohorts ────────────────────────────────────────────────
   const cohortRows = cohort_ids.map((cohort_id: string) => ({
     session_id:    session.id,
     cohort_id,

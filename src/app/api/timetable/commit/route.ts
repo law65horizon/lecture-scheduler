@@ -23,52 +23,35 @@ async function requireAdmin() {
 // ─── POST /api/timetable/commit ───────────────────────────────────────────────
 //
 // Admin-only. Receives the array of ProposedSessions returned by /generate,
-// then writes them all to timetable_sessions + session_cohorts in a single
-// Supabase operation. The DB unique constraints (H1, H2, H3) act as a final
-// safety net at the database level.
+// then writes them all to timetable_sessions + session_cohorts.
 //
 // Before inserting, we DELETE any existing UNPUBLISHED sessions for the same
-// academic_year + semester so the admin can regenerate freely without
-// accumulating stale drafts. Published sessions are never touched.
+// academic_year + semester so the admin can regenerate freely. Published
+// sessions are never touched.
 //
 // Body: { sessions: ProposedSession[], academic_year: string, semester: 1 | 2 }
-//
-// Response: { count: number }  — number of sessions committed
+// Response: { count: number }
 
 export async function POST(request: Request) {
   const user = await requireAdmin()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // ── Parse and validate body ───────────────────────────────────────────────
   const body = await request.json()
   const { sessions, academic_year, semester } = body
 
   if (!Array.isArray(sessions) || sessions.length === 0) {
-    return NextResponse.json(
-      { error: 'sessions must be a non-empty array' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'sessions must be a non-empty array' }, { status: 400 })
   }
   if (!academic_year?.trim()) {
-    return NextResponse.json(
-      { error: 'academic_year is required' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'academic_year is required' }, { status: 400 })
   }
   if (semester !== 1 && semester !== 2) {
-    return NextResponse.json(
-      { error: 'semester must be 1 or 2' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'semester must be 1 or 2' }, { status: 400 })
   }
 
   const admin = createAdminClient()
 
   // ── Step 1: Delete existing UNPUBLISHED sessions for this year + semester ──
-  // This lets the admin regenerate a timetable without manual cleanup.
-  // Published sessions (is_published = true) are deliberately left untouched —
-  // an admin must unpublish manually before regenerating if they want a clean
-  // slate that replaces a live timetable.
   const { error: deleteErr } = await admin
     .from('timetable_sessions')
     .delete()
@@ -88,7 +71,7 @@ export async function POST(request: Request) {
     time_slot_id:  s.time_slot_id,
     academic_year: academic_year.trim(),
     semester,
-    is_published:  false,       // always starts as draft; admin publishes later
+    is_published:  false,
     created_by:    user.id,
   }))
 
@@ -98,8 +81,6 @@ export async function POST(request: Request) {
     .select('id, course_id, lecturer_id, venue_id, time_slot_id')
 
   if (sessionErr) {
-    // The DB unique constraints will catch any double-booking that slipped past
-    // the solver (shouldn't happen, but belt-and-braces).
     if (sessionErr.code === '23505') {
       return NextResponse.json(
         {
@@ -114,9 +95,22 @@ export async function POST(request: Request) {
   }
 
   // ── Step 3: Insert all session_cohorts rows ───────────────────────────────
-  // Map each inserted session back to its cohort_ids from the proposed sessions.
-  // We rely on insertion order being preserved (Supabase/Postgres guarantees
-  // returning rows in insert order when no ORDER BY is applied to a bulk insert).
+  //
+  // FIX: We match each inserted DB session back to its proposed session using
+  // course_id + time_slot_id as a composite key — NOT by array index.
+  //
+  // Relying on array-index alignment is unsafe: PostgREST/Postgres does not
+  // guarantee that bulk-insert RETURNING rows come back in the same order as
+  // the input.  Mis-alignment would silently assign the wrong cohorts to the
+  // wrong sessions — a silent data-corruption bug.
+  //
+  // course_id + time_slot_id is a safe key here because the solver guarantees
+  // each course appears at most once per slot (H4), so the pair is unique
+  // within any single commit batch.
+  const dbSessionIndex = new Map<string, { id: string; time_slot_id: string }>(
+    (insertedSessions ?? []).map((s) => [`${s.course_id}|${s.time_slot_id}`, s])
+  )
+
   const cohortRows: {
     session_id:    string
     cohort_id:     string
@@ -125,9 +119,24 @@ export async function POST(request: Request) {
     semester:      number
   }[] = []
 
-  for (let i = 0; i < (insertedSessions ?? []).length; i++) {
-    const dbSession      = insertedSessions![i]
-    const proposed       = (sessions as ProposedSession[])[i]
+  for (const proposed of sessions as ProposedSession[]) {
+    const key       = `${proposed.course_id}|${proposed.time_slot_id}`
+    const dbSession = dbSessionIndex.get(key)
+
+    if (!dbSession) {
+      // Should never happen — every proposed session was just inserted above.
+      // If it does, roll back cleanly rather than leaving orphaned rows.
+      const sessionIds = (insertedSessions ?? []).map((s) => s.id)
+      await admin.from('timetable_sessions').delete().in('id', sessionIds)
+      return NextResponse.json(
+        {
+          error:
+            `Could not match inserted session for course ${proposed.course_id} ` +
+            `at slot ${proposed.time_slot_id}. Rolled back.`,
+        },
+        { status: 500 }
+      )
+    }
 
     for (const cohort_id of proposed.cohort_ids) {
       cohortRows.push({
@@ -146,15 +155,9 @@ export async function POST(request: Request) {
       .insert(cohortRows)
 
     if (cohortErr) {
-      // Cohort insert failed — roll back the sessions we just inserted so we
-      // don't leave orphaned timetable_sessions rows (Supabase JS has no
-      // savepoints, so we do a manual cleanup).
+      // Roll back timetable_sessions so we don't leave orphaned rows.
       const sessionIds = (insertedSessions ?? []).map((s) => s.id)
-      await admin
-        .from('timetable_sessions')
-        .delete()
-        .in('id', sessionIds)
-
+      await admin.from('timetable_sessions').delete().in('id', sessionIds)
       return NextResponse.json({ error: cohortErr.message }, { status: 500 })
     }
   }

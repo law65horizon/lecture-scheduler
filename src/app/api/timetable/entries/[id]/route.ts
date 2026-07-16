@@ -2,7 +2,7 @@ import { createAdminClient }      from '@/lib/supabase/admin'
 import { createClient }           from '@/lib/supabase/server'
 import { NextResponse }            from 'next/server'
 import { checkHardConstraints }    from '@/lib/solver/constraints'
-import type { Venue, Cohort, ProposedSession, Semester } from '@/lib/types/domain'
+import { buildConstraintSnapshot } from '@/lib/timetable/snapshot'
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -21,62 +21,6 @@ async function requireAdmin() {
   return user
 }
 
-// ─── Shared: build constraint snapshot (excluding one session for PUT) ────────
-
-async function buildConstraintSnapshot(
-  admin: ReturnType<typeof createAdminClient>,
-  academic_year: string,
-  semester: number,
-  excludeSessionId?: string,
-) {
-  let query = admin
-    .from('timetable_sessions')
-    .select(`id, course_id, lecturer_id, venue_id, time_slot_id, session_cohorts(cohort_id)`)
-    .eq('academic_year', academic_year)
-    .eq('semester', semester)
-
-  if (excludeSessionId) {
-    query = query.neq('id', excludeSessionId)
-  }
-
-  const { data: sessions, error: sessErr } = await query
-  if (sessErr) return { error: sessErr.message }
-
-  const committed: ProposedSession[] = (sessions ?? []).map((s: any) => ({
-    course_id:     s.course_id,
-    lecturer_id:   s.lecturer_id,
-    venue_id:      s.venue_id,
-    time_slot_id:  s.time_slot_id,
-    academic_year,
-    semester:      semester as Semester,
-    cohort_ids:    (s.session_cohorts ?? []).map((sc: any) => sc.cohort_id),
-  }))
-
-  const { data: venues, error: venueErr } = await admin
-    .from('venues')
-    .select('id, name, capacity, venue_type, is_active')
-  if (venueErr) return { error: venueErr.message }
-
-  const { data: cohorts, error: cohortErr } = await admin
-    .from('cohorts')
-    .select('id, department_id, year_level, student_count')
-  if (cohortErr) return { error: cohortErr.message }
-
-  const cohortMap = new Map<string, Cohort>(
-    (cohorts ?? []).map((c: any) => [c.id, c as Cohort])
-  )
-
-  const { data: unavailRows } = await admin
-    .from('lecturer_unavailability')
-    .select('lecturer_id, time_slot_id')
-
-  const unavailableSlots = new Set<string>(
-    (unavailRows ?? []).map((r: any) => `${r.lecturer_id}|${r.time_slot_id}`)
-  )
-
-  return { committed, venues: (venues ?? []) as Venue[], cohortMap, unavailableSlots }
-}
-
 // ─── PUT /api/timetable/entries/[id] ─────────────────────────────────────────
 //
 // Admin-only. Edits a single timetable session.
@@ -85,12 +29,12 @@ async function buildConstraintSnapshot(
 // Replaces session_cohorts for that session.
 //
 // Body: {
-//   lecturer_id, venue_id, time_slot_id,
+//   course_id, lecturer_id, venue_id, time_slot_id,
 //   academic_year, semester, cohort_ids: string[]
 // }
 //
-// Note: course_id is intentionally not editable once a session is created.
-// If the admin needs to change the course, they should delete and re-add.
+// Note: course_id is not editable. If the admin needs to change the course,
+// they should delete and re-add.
 
 export async function PUT(
   request: Request,
@@ -104,7 +48,6 @@ export async function PUT(
   const { lecturer_id, venue_id, time_slot_id,
           academic_year, semester, cohort_ids, course_id } = body
 
-  // ── Validation ─────────────────────────────────────────────────────────────
   if (!lecturer_id || !venue_id || !time_slot_id || !course_id) {
     return NextResponse.json(
       { error: 'course_id, lecturer_id, venue_id, and time_slot_id are required' },
@@ -118,10 +61,7 @@ export async function PUT(
     return NextResponse.json({ error: 'semester must be 1 or 2' }, { status: 400 })
   }
   if (!Array.isArray(cohort_ids) || cohort_ids.length === 0) {
-    return NextResponse.json(
-      { error: 'cohort_ids must be a non-empty array' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'cohort_ids must be a non-empty array' }, { status: 400 })
   }
 
   const admin = createAdminClient()
@@ -142,7 +82,7 @@ export async function PUT(
     admin,
     academic_year.trim(),
     semester,
-    id,            // exclude self
+    id,  // exclude self so we don't clash against the slot we currently occupy
   )
   if ('error' in snapshot) {
     return NextResponse.json({ error: snapshot.error }, { status: 500 })
@@ -185,7 +125,6 @@ export async function PUT(
   }
 
   // ── Replace session_cohorts ───────────────────────────────────────────────
-  // Delete existing rows then insert the new set.
   const { error: delCohortErr } = await admin
     .from('session_cohorts')
     .delete()
@@ -242,7 +181,6 @@ export async function DELETE(
 // ─── PATCH /api/timetable/entries/[id] ───────────────────────────────────────
 //
 // Admin-only. Toggles is_published for a single session.
-// Called by the Publish/Unpublish toggle in the admin timetable UI.
 // Body: { is_published: boolean }
 
 export async function PATCH(
@@ -256,10 +194,7 @@ export async function PATCH(
   const { is_published } = await request.json()
 
   if (typeof is_published !== 'boolean') {
-    return NextResponse.json(
-      { error: 'is_published must be a boolean' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'is_published must be a boolean' }, { status: 400 })
   }
 
   const admin = createAdminClient()

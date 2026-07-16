@@ -13,3 +13,19 @@
     @apply bg-gray-50 text-gray-900 antialiased;
   }
 }
+
+@media print {
+  aside,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  main {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  body {
+    background: white !important;
+  }
+}

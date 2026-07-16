@@ -137,7 +137,7 @@ export function CourseModal({ open, onClose, editing }: Props) {
   if (!open) return null
 
   return (
-    <div style={{paddingTop: '70px', overflowY: 'scroll'}} className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/30 backdrop-blur-sm"
@@ -145,10 +145,7 @@ export function CourseModal({ open, onClose, editing }: Props) {
       />
 
       {/* Modal card — taller than other modals due to cohort multi-select */}
-      <div style={{padding: '20px',}} className="relative bg-white w-full sm:max-w-lg sm:mx-4 flex flex-col
-                      rounded-t-[20px] sm:rounded-2xl
-                      max-h-[92svh] sm:max-h-[88vh]
-                      shadow-xl">
+      <div style={{height: '90%', overflowY: 'scroll'}} className="relative bg-white rounded-2xl shadow-xl w-full max-w-xl mx-4 p-6 max-h-[90vh] overflow-y-scroll">
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100 shrink-0">
           <h2 className="text-base font-semibold text-gray-900">
